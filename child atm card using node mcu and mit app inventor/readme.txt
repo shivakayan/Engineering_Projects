@@ -1,0 +1,4 @@
+	This project main moto is to give some financial acess to children of age group 10-13yrs.
+	we are using rfid cards as teh atm cards for children of that age and whenever they scan tehir registered rfid cards against an rfid card reader the merchant of the particular shop ho is registered with us gets an alert in his mobile through our mobile app.
+	now by following the prompts in our app merchant can request a payment of certain amount of money which is within the spend limit of the child from their parents, his/her parents will be sent a text message with the same message.
+	Iam attaching the node mcu code along with the apk file to use along with the code, dont forget to replace the google sheet ids with your google sheet ids with proper app script to handle requests through url.

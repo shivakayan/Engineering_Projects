@@ -1,0 +1,84 @@
+`timescale 1ns/1ps
+
+module tb_pswd_dtctr;
+
+reg clk,rst;
+
+reg [3:0]passin,nwa;
+
+wire lock,ws;
+wire sat;
+wire [3:0]cnt;
+
+ pswd_dtctrdup uut(passin,rst,nwa,lock,clk,ws,cnt,sat);
+
+always #5 clk=~clk;
+
+initial
+
+begin
+
+clk=0;rst=0;nwa=2;
+
+#1 rst<=1;
+
+#1 rst<=0;
+
+@(posedge clk) passin=1;
+
+@(posedge clk) passin=2;
+
+@(posedge clk) passin=3;
+
+@(posedge clk) passin=4;
+
+@(posedge clk) passin=5;
+
+@(posedge clk) passin=6;
+
+@(posedge clk) passin=7;
+
+@(posedge clk) passin=8;
+
+@(posedge clk) passin=3;
+
+@(posedge clk) passin=1;
+
+@(posedge clk) passin=2;
+
+@(posedge clk) passin=3;
+
+@(posedge clk) passin=4;
+
+@(posedge clk) passin=5;
+
+@(posedge clk) passin=6;
+
+@(posedge clk) passin=7;
+
+@(posedge clk) passin=8;
+
+@(posedge clk) passin=2;
+
+@(posedge clk) passin=1;
+
+@(posedge clk) passin=2;
+
+@(posedge clk) passin=3;
+
+@(posedge clk) passin=4;
+
+@(posedge clk) passin=5;
+
+@(posedge clk) passin=6;
+
+@(posedge clk) passin=7;
+
+@(posedge clk) passin=8;
+
+end
+
+endmodule
+
+
+

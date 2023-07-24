@@ -1,0 +1,6 @@
+This project aim is to make sure the rider wears the helmet while riding the bike.
+how do we achieve this?
+	well to achieve this i have choosen 2 nodemcu's where one of it will be at the key hole of the bike and this nodemcu holds a relay which will interupt a wire running  from engine to key hole which is responsible for completing the circuit when key is turned on.
+	and the other nodemcu will be in the helmet of the rider and an alcohol sensor and a pushbutton will be connected to this node mcu, these both node mcu's will be connected to each by a client and server protocal, the one in the helmet will be the acesspooint and the one near the keyhole will connect to it, the helmet node mcu will send coninous http requests which tell the current state of pushbutton and alcohol sensor.
+	when the alcohol sensor value breaches teh threshold or the push button isn't pressed(when he wears helmet the button inside the helmet will be pressed by default)
+tehn the node mcu near the key hole will turn off the relay ensuring that the vehicle ignition is off.

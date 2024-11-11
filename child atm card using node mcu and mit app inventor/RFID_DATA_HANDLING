@@ -1,0 +1,45 @@
+function doGet(e) { 
+  var ss = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/18R5oKcLSwyfcRtBPedreUNTzu7pBOfFK2HXbvDvsgIU/edit#gid=0");
+  var sheet = ss.getSheetByName("RFID_DATA");
+
+  addUser(e, sheet);
+
+  // Create a response object
+  var response = {
+    message: "User added successfully"
+  };
+
+  // Convert the response object to JSON
+  var jsonResponse = JSON.stringify(response);
+
+  // Set the content type and return the response
+  return ContentService.createTextOutput(jsonResponse).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) { 
+  var ss = SpreadsheetApp.openByUrl("https://docs.google.com/spreadsheets/d/18R5oKcLSwyfcRtBPedreUNTzu7pBOfFK2HXbvDvsgIU/edit#gid=0");
+  var sheet = ss.getSheetByName("RFID_DATA"); 
+  
+  addUser(e, sheet);
+
+  // Create a response object
+  var response = {
+    message: "User added successfully"
+  };
+
+  // Convert the response object to JSON
+  var jsonResponse = JSON.stringify(response);
+
+  // Set the content type and return the response
+  return ContentService.createTextOutput(jsonResponse).setMimeType(ContentService.MimeType.JSON);
+}
+
+function addUser(e, sheet) {
+  var RFID_CARD = e.parameter.RFID_CARD;
+  var STUDENT_NAME=e.parameter.STUDENT_NAME;
+  var MOBILE=e.parameter.MOBILE;
+  var GENDER=e.parameter.GENDER;  
+
+  sheet.appendRow([RFID_CARD,STUDENT_NAME,MOBILE,GENDER]);
+
+}

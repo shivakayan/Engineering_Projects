@@ -14,7 +14,8 @@ String tag;
 const char* ssid = "Shiva Kalyan";//Keep your ssid
 const char* password = "shivakalyan@2003";//keep your pswd
 const char* scriptURL = "https://script.google.com/macros/s/AKfycbwQzrSAu1WHKjJODoisEVes1qqs65Ez2xvkGA3XZf2TEv-A8zhBJIYoUit6K7dsjakTGg/exec";//This is the web app id
-
+//The links to sheets is https://docs.google.com/spreadsheets/d/18R5oKcLSwyfcRtBPedreUNTzu7pBOfFK2HXbvDvsgIU/edit?gid=0#gid=0
+//The links to sheets is https://docs.google.com/spreadsheets/d/19P9AFXAjl23jTKXzGxCxe-y77I5DEny00l5s0WVWRi8/edit?gid=0#gid=0
 void setup() {
   Serial.begin(9600);
     SPI.begin(); // Init SPI bus

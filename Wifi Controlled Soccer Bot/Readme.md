@@ -92,7 +92,3 @@ This project is licensed under the MIT License. See the `LICENSE` file for more 
 
 ## Acknowledgments
 - Inspiration from robotics and IoT projects.
-
----
-
-

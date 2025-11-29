@@ -1,0 +1,391 @@
+/***************************************************************************/ /**
+ * @file si70xx_example.c
+ * @brief si70xx example APIs
+ *******************************************************************************
+ * # License
+ * <b>Copyright 2023 Silicon Laboratories Inc. www.silabs.com</b>
+ *******************************************************************************
+ *
+ * The licensor of this software is Silicon Laboratories Inc. Your use of this
+ * software is governed by the terms of Silicon Labs Master Software License
+ * Agreement (MSLA) available at
+ * www.silabs.com/about-us/legal/master-software-license-agreement. This
+ * software is distributed to you in Source Code format and is governed by the
+ * sections of the MSLA applicable to Source Code.
+ *
+ ******************************************************************************/
+#include "rsi_debug.h"
+#include "sl_si91x_si70xx.h"
+#include "si70xx_example.h"
+#include "sl_sleeptimer.h"
+#include "sl_si91x_driver_gpio.h"
+#include "sl_si91x_clock_manager.h"
+#include "sl_sleeptimer.h"
+#include "sl_sleeptimer_config.h"
+#include "app.h"
+#include "glib.h"
+#include "sl_memlcd.h"
+#include "dmd.h"
+#include "RTE_Device_917.h"
+#include "sl_status.h"
+#include "rsi_ccp_user_config.h"
+
+#include "sl_assert.h"
+/*******************************************************************************
+ ***************************  Defines / Macros  ********************************
+ ******************************************************************************/
+#define SL_BOARD_ENABLE_DISPLAY_PIN  0
+#define SL_BOARD_ENABLE_DISPLAY_PORT 0
+#define TX_THRESHOLD       0       // tx threshold value
+#define RX_THRESHOLD       0       // rx threshold value
+#define I2C                SL_I2C2 // I2C 2 instance
+#define USER_REG_1         0xBA    // writing data into user register
+#define DELAY_PERIODIC_MS1 2000    //sleeptimer1 periodic timeout in ms
+#define MODE_0             0       // Initializing GPIO MODE_0 value
+#define OUTPUT_VALUE       1       // GPIO output value
+#define SOC_PLL_CLK  ((uint32_t)(32000000))  // 32MHz default SoC PLL Clock as source to Processor
+#define templow 23
+#define temphigh 27
+#define INTF_PLL_CLK ((uint32_t)(180000000)) // 180MHz default Interface PLL Clock as source to all peripherals
+/*******************************************************************************
+ ******************************  Data Types  ***********************************
+ ******************************************************************************/
+/*******************************************************************************
+ *************************** LOCAL VARIABLES   *******************************
+ ******************************************************************************/
+typedef sl_i2c_config_t sl_i2c_configuration_t;
+sl_sleeptimer_timer_handle_t timer1; //sleeptimer1 handle
+boolean_t delay_timeout = false;     //Indicates sleeptimer1 timeout
+/*******************************************************************************
+ **********************  Local Function prototypes   ***************************
+ ******************************************************************************/
+static void i2c_leader_callback(sl_i2c_instance_t i2c_instance, uint32_t status);
+//Sleeptimer timeout callbacks
+static void on_timeout_timer1(sl_sleeptimer_timer_handle_t *handle, void *data);
+void delay(uint32_t idelay);
+static void default_clock_configuration(void);
+static GLIB_Context_t glibContext;
+static int currentLine = 0;
+int flaglow=0;
+int flaghigh=0;
+char slow[9]="TOO COLD";
+char shigh[11]="TOO HOT!!!";
+char s[7]="NORMAL";
+/*******************************************************************************
+ **************************   GLOBAL FUNCTIONS   *******************************
+ ******************************************************************************/
+// Function to configure clock on powerup
+void memlcd_app_init(void)
+{
+  sl_status_t status;
+
+  /* Enabling MEMLCD display */
+  sl_memlcd_display_enable();
+
+  /* Initialize the DMD support for memory lcd display */
+  status = DMD_init(0);
+  EFM_ASSERT(status == DMD_OK);
+
+  /* Initialize the glib context */
+  status = GLIB_contextInit(&glibContext);
+  EFM_ASSERT(status == GLIB_OK);
+
+  glibContext.backgroundColor = White;
+  glibContext.foregroundColor = Black;
+
+  /* Fill lcd with background color */
+  GLIB_clear(&glibContext);
+
+  /* Use Narrow font */
+  GLIB_setFont(&glibContext, (GLIB_Font_t *)&GLIB_FontNarrow6x8);
+
+  /* Draw text on the memory lcd display*/
+  if(flaghigh){
+      flaghigh=0;
+      GLIB_drawStringOnLine(&glibContext, shigh, currentLine, GLIB_ALIGN_LEFT, 5, 5, true);
+  }
+  else if(flaglow){
+      flaglow=0;
+      GLIB_drawStringOnLine(&glibContext, slow, currentLine, GLIB_ALIGN_LEFT, 5, 5, true);
+   }
+  else
+    GLIB_drawStringOnLine(&glibContext, s, currentLine++, GLIB_ALIGN_LEFT, 5, 5, true);
+
+  DMD_updateDisplay();
+}
+
+static void default_clock_configuration(void)
+{
+  // Core Clock runs at 32MHz SOC PLL Clock
+  sl_si91x_clock_manager_m4_set_core_clk(M4_SOCPLLCLK, SOC_PLL_CLK);
+
+  // All peripherals' source to be set to Interface PLL Clock
+  // and it runs at 180MHz
+  sl_si91x_clock_manager_set_pll_freq(INFT_PLL, INTF_PLL_CLK, PLL_REF_CLK_VAL_XTAL);
+}
+/*******************************************************************************
+ * RHT example initialization function
+ ******************************************************************************/
+void si70xx_example_init(void)
+{
+  sl_status_t status;
+  uint8_t firm_rev;
+  sl_i2c_configuration_t i2c_config;
+  uint32_t humidity;
+  int32_t temperature;
+  uint8_t value;
+  i2c_config.mode           = SL_I2C_LEADER_MODE;
+  i2c_config.transfer_type  = SL_I2C_USING_INTERRUPT;
+  i2c_config.operating_mode = SL_I2C_STANDARD_MODE;
+  i2c_config.i2c_callback   = i2c_leader_callback;
+
+  // default clock configuration by application common for whole system
+  default_clock_configuration();
+
+  do {
+#if defined(SENSOR_ENABLE_GPIO_MAPPED_TO_UULP)
+    if (sl_si91x_gpio_driver_get_uulp_npss_pin(SENSOR_ENABLE_GPIO_PIN) != 1) {
+      // Enable GPIO ULP_CLK
+      status = sl_si91x_gpio_driver_enable_clock((sl_si91x_gpio_select_clock_t)ULPCLK_GPIO);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_enable_clock, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver clock enable is successful \n");
+      // Set NPSS GPIO pin MUX
+      status = sl_si91x_gpio_driver_set_uulp_npss_pin_mux(SENSOR_ENABLE_GPIO_PIN, NPSS_GPIO_PIN_MUX_MODE0);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_set_uulp_npss_pin_mux, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver uulp pin mux selection is successful \n");
+      // Set NPSS GPIO pin direction
+      status =
+        sl_si91x_gpio_driver_set_uulp_npss_direction(SENSOR_ENABLE_GPIO_PIN, (sl_si91x_gpio_direction_t)GPIO_OUTPUT);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_set_uulp_npss_direction, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver uulp pin direction selection is successful \n");
+      // Set UULP GPIO pin
+      status = sl_si91x_gpio_driver_set_uulp_npss_pin_value(SENSOR_ENABLE_GPIO_PIN, SET);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_set_uulp_npss_pin_value, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver set uulp pin value is successful \n");
+    }
+#else
+    sl_gpio_t sensor_enable_port_pin = { SENSOR_ENABLE_GPIO_PORT, SENSOR_ENABLE_GPIO_PIN };
+    uint8_t pin_value;
+
+    status = sl_gpio_driver_get_pin(&sensor_enable_port_pin, &pin_value);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("sl_gpio_driver_get_pin, Error code: %lu", status);
+      break;
+    }
+    if (pin_value != 1) {
+      // Enable GPIO CLK
+#ifdef SENSOR_ENABLE_GPIO_MAPPED_TO_ULP
+      status = sl_si91x_gpio_driver_enable_clock((sl_si91x_gpio_select_clock_t)ULPCLK_GPIO);
+#else
+      status = sl_si91x_gpio_driver_enable_clock((sl_si91x_gpio_select_clock_t)M4CLK_GPIO);
+#endif
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_enable_clock, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver clock enable is successful \n");
+
+      // Set the pin mode for GPIO pins.
+      status = sl_gpio_driver_set_pin_mode(&sensor_enable_port_pin, MODE_0, OUTPUT_VALUE);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_gpio_driver_set_pin_mode, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver pin mode select is successful \n");
+      // Select the direction of GPIO pin whether Input/ Output
+      status = sl_si91x_gpio_driver_set_pin_direction(SENSOR_ENABLE_GPIO_PORT,
+                                                      SENSOR_ENABLE_GPIO_PIN,
+                                                      (sl_si91x_gpio_direction_t)GPIO_OUTPUT);
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_si91x_gpio_driver_set_pin_direction, Error code: %lu", status);
+        break;
+      }
+      // Set GPIO pin
+      status = sl_gpio_driver_set_pin(&sensor_enable_port_pin); // Set ULP GPIO pin
+      if (status != SL_STATUS_OK) {
+        DEBUGOUT("sl_gpio_driver_set_pin, Error code: %lu", status);
+        break;
+      }
+      DEBUGOUT("GPIO driver set pin value is successful \n");
+    }
+#endif
+
+    /* Wait for sensor to become ready */
+    delay(80);
+
+    //Start 2000 ms periodic timer
+    sl_sleeptimer_start_periodic_timer_ms(&timer1,
+                                          DELAY_PERIODIC_MS1,
+                                          on_timeout_timer1,
+                                          NULL,
+                                          0,
+                                          SL_SLEEPTIMER_NO_HIGH_PRECISION_HF_CLOCKS_REQUIRED_FLAG);
+    // Initialize I2C bus
+    status = sl_i2c_driver_init(I2C, &i2c_config);
+    if (status != SL_I2C_SUCCESS) {
+      DEBUGOUT("sl_i2c_driver_init : Invalid Parameters, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully initialized and configured i2c leader\n");
+    }
+    status = sl_i2c_driver_configure_fifo_threshold(I2C, TX_THRESHOLD, RX_THRESHOLD);
+    if (status != SL_I2C_SUCCESS) {
+      DEBUGOUT("sl_i2c_driver_configure_fifo_threshold : Invalid Parameters, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully configured i2c TX & RX FIFO thresholds\n");
+    }
+    // reset the sensor
+    status = sl_si91x_si70xx_reset(I2C, SI7021_ADDR);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor reset un-successful, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully reset sensor\n");
+    }
+    // Initializes sensor and reads electronic ID 1st byte
+    status = sl_si91x_si70xx_init(I2C, SI7021_ADDR, SL_EID_FIRST_BYTE);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor initialization un-successful, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully initialized sensor\n");
+    }
+    // Initializes sensor and reads electronic ID 2nd byte
+    status = sl_si91x_si70xx_init(I2C, SI7021_ADDR, SL_EID_SECOND_BYTE);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor initialization un-successful, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully reset sensor\n");
+    }
+    // Get sensor internal firmware version of sensor
+    status = sl_si91x_si70xx_get_firmware_revision(I2C, SI7021_ADDR, &firm_rev);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor firmware version un-successful, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Successfully firmware version of sensor is read\n");
+    }
+    DEBUGOUT("firmware version:%x\n", firm_rev);
+    // write register data into sensor
+    status = sl_si91x_si70xx_write_control_register(I2C, SI7021_ADDR, SL_RH_T_USER_REG, USER_REG_1);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor user register 1 write data failed, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Sensor user register 1 write data is successful\n");
+    }
+    // Reads register data from sensor
+    status = sl_si91x_si70xx_read_control_register(I2C, SI7021_ADDR, SL_RH_T_USER_REG, &value);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor user register 1 read failed, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Sensor user register 1 read is successful\n");
+    }
+    DEBUGOUT("user register data:%x\n", value);
+    // Reads temperature from humidity from sensor
+    status = sl_si91x_si70xx_read_temp_from_rh(I2C, SI7021_ADDR, &humidity, &temperature);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor temperature read failed, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Sensor temperature read is successful\n");
+    }
+    DEBUGOUT("sensor humidity :%ld\n", humidity);
+    DEBUGOUT("sensor temperature :%ld\n", temperature);
+    // measure humidity data from sensor
+    status = sl_si91x_si70xx_measure_humidity(I2C, SI7021_ADDR, &humidity);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor humidity read failed, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Sensor humidity read is successful\n");
+    }
+    DEBUGOUT("sensor humidity :%ld\n", humidity);
+    // measure temperature data from sensor
+    status = sl_si91x_si70xx_measure_temperature(I2C, SI7021_ADDR, &temperature);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor temperature read failed, Error Code: 0x%ld \n", status);
+      break;
+    } else {
+      DEBUGOUT("Sensor temperature read is successful\n");
+    }
+    DEBUGOUT("sensor temperature :%ld\n", temperature);
+  } while (false);
+}
+
+/*******************************************************************************
+ * Function will run continuously in while loop and reads relative humidity and
+ * temperature from sensor
+ ******************************************************************************/
+void si70xx_example_process_action(void)
+{
+  sl_status_t status;
+  uint32_t humidity   = 0;
+  int32_t temperature = 0;
+  if (delay_timeout == true) {
+    delay_timeout = false;
+    // Reads humidity(hold master mode) measurement from sensor
+    status = sl_si91x_si70xx_measure_rh_and_temp(I2C, SI7021_ADDR, &humidity, &temperature);
+    if (status != SL_STATUS_OK) {
+      DEBUGOUT("Sensor temperature read failed, Error Code: 0x%ld \n", status);
+    } else {
+      DEBUGOUT("Sensor temperature read is successful\n");
+    }
+    DEBUGOUT("Ambient light sensor value is:%ld\n", humidity);
+    DEBUGOUT("Sensor temperature value is:%ld\n", temperature);
+    if(temperature>temphigh)
+      flaghigh=1;
+    if(temperature<templow)
+      flaglow=1;
+    memlcd_app_init();
+  }
+}
+
+/*******************************************************************************
+ * Callback Function
+ ******************************************************************************/
+void i2c_leader_callback(sl_i2c_instance_t i2c_instance, uint32_t status)
+{
+  (void)i2c_instance;
+  switch (status) {
+    case SL_I2C_DATA_TRANSFER_COMPLETE:
+      break;
+    default:
+      break;
+  }
+}
+
+/***************************************************************************/ /**
+ * Sleeptimer timeout callback.
+ ******************************************************************************/
+static void on_timeout_timer1(sl_sleeptimer_timer_handle_t *handle, void *data)
+{
+  (void)&handle;
+  (void)&data;
+  delay_timeout = true;
+}
+/*******************************************************************************
+* Function to provide 1 ms Delay
+*******************************************************************************/
+void delay(uint32_t idelay)
+{
+  for (uint32_t x = 0; x < 4600 * idelay; x++) //1.002ms delay
+  {
+    __NOP();
+  }
+}
